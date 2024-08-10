@@ -104,7 +104,8 @@ class Allocator {
  public:
   Allocator() = default;
   // Allocator does not take ownership of `device` (`device` is not going
-  // to be released)
+  // to be released and has to be valid for the lifetime of
+  // Allocator)
   Allocator(ID3D12Device* device) : device_(device) {}
 
   ~Allocator() {
@@ -130,7 +131,8 @@ class Allocator {
     for (const Allocation& alloc : allocations_) {
       std::cerr << "[dx12-ma] Memory Leaked: " << alloc.size
                 << " bytes at offset " << alloc.offset
-                << " with dx12 heap type " << alloc.heap_type << "\n";
+                << " with dx12 heap type/index: " << alloc.heap_type << "/"
+                << alloc.heap_index << "\n";
     }
 #endif
   }
@@ -233,12 +235,11 @@ class Allocator {
     new_block->next = head_;
     head_ = new_block;
 
-    heap_count_++;
-
 #ifdef DX12_MA_DEBUG
-    allocations_.insert({size, 0, heap_type, heap_count_ - 1, new_heap});
+    allocations_.insert({size, 0, heap_type, heap_count_, new_heap});
 #endif
 
+    heap_count_++;
     return Allocation{size, 0, heap_type, heap_count_ - 1, new_heap};
   }
 
@@ -263,8 +264,8 @@ class Allocator {
     FreeBlock* current = head_;
 
     // Find a suitable location to insert the new block at, sorted by offset,
-    // as well as the heap type
-    while (current && (current->heap_type != alloc.heap_type ||
+    // as well as the heap index
+    while (current && (current->heap_index != alloc.heap_index ||
                        current->offset < alloc.offset)) {
       prev = current;
       current = current->next;
@@ -320,7 +321,8 @@ class ResourceWrapper {
     if (resource_) resource_->Release();
   }
 
-  // set_resource takes ownership over `t` and releases it on deconstruction
+  // set_resource takes ownership over `resource` and releases it on
+  // deconstruction
   inline void set_resource(T* resource) { resource_ = resource; }
   inline T* get_resource() { return resource_; }
 
