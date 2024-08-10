@@ -64,8 +64,7 @@ struct Allocation {
   bool operator==(const Allocation& other) const {
     return size == other.size && offset == other.offset &&
            heap_index ==
-               other.heap_index;  // when comparing `heap_index`, it's basically
-                                  // also checking the heap and heap type
+               other.heap_index;  // Also checking the heap and heap type
   }
 };
 
@@ -319,12 +318,44 @@ class ResourceWrapper {
   ResourceWrapper(const Allocation& alloc, Allocator* mem_alloc)
       : alloc_(alloc), mem_alloc_(mem_alloc) {}
   ~ResourceWrapper() {
+    if (mem_alloc_ == nullptr) return;
     mem_alloc_->Free(alloc_);
     if (resource_) {
       if (memory_mapped_) resource_->Unmap(0, nullptr);
       resource_->Release();
     }
   }
+
+  ResourceWrapper(const ResourceWrapper&) = delete;
+  ResourceWrapper& operator=(const ResourceWrapper&) = delete;
+
+  ResourceWrapper(ResourceWrapper&& other) noexcept
+      : alloc_(std::move(other.alloc_)),
+        data_(other.data_),
+        resouce_(other.resource_),
+        memory_mapped_(other.memory_mapped_),
+        mem_alloc_(other.mem_alloc_) {
+    other.data_ = nullptr;
+    other.resouce_ = nullptr;
+    other.mem_alloc_ = nullptr;
+    other.memory_mapped_ = false;
+  }
+
+  Allocation& operator=(Allocation&& other) noexcept {
+    if (this != &other) {
+      alloc_ = std::move(other.alloc_);
+      data_ = other.data_;
+      resouce_ = other.resource_;
+      memory_mapped_ = other.memory_mapped_;
+      mem_alloc_ = other.mem_alloc_;
+
+      other.data_ = nullptr;
+      other.resouce_ = nullptr;
+      other.mem_alloc_ = nullptr;
+      other.memory_mapped_ = false;
+    }
+    return *this;
+  };
 
   inline char* memory() { return data_; }
   inline D3D12_GPU_VIRTUAL_ADDRESS get_gpu_address() {
