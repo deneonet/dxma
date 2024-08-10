@@ -445,12 +445,16 @@ class ResourceWrapper {
   }
 
   inline void MapMemory() {
+    if (memory_mapped_) return;
+
     D3D12_RANGE read_range{0, 0};
     assert(SUCCEEDED(
         resource_->Map(0, &read_range, reinterpret_cast<void**>(&data_))));
     memory_mapped_ = true;
   }
   inline void UnmapMemory() {
+    if (!memory_mapped_) return;
+
     resource_->Unmap(0, nullptr);
     memory_mapped_ = false;
   }
