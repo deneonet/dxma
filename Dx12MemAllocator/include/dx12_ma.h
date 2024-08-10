@@ -52,7 +52,6 @@ namespace dx12_ma {
 #endif
 
 // Represents a memory allocation with size, offset, heap type, and heap pointer
-// You can attach a resource to it
 struct Allocation {
   UINT64 size = 0;
   UINT64 offset = 0;
