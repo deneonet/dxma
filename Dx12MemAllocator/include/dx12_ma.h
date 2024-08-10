@@ -155,8 +155,11 @@ class Allocator {
   inline UINT32 get_allocated_heap_count() const { return heap_count_; }
 
   // Allocates a memory block from the specified heap using `heap_type`
-  Allocation Allocate(UINT64 size, D3D12_HEAP_TYPE heap_type) {
+  // To disable the alignment, set 0 as `alignment`
+  Allocation Allocate(UINT64 size, D3D12_HEAP_TYPE heap_type,
+                      UINT64 alignment = 0) {
     if (size == 0) return {0};
+    size = alignment == 0 ? size : (size + alignment - 1) & ~(alignment - 1);
 
     FreeBlock* ptr = head_;
     FreeBlock* prev = nullptr;
@@ -318,17 +321,38 @@ class ResourceWrapper {
       : alloc_(alloc), mem_alloc_(mem_alloc) {}
   ~ResourceWrapper() {
     mem_alloc_->Free(alloc_);
-    if (resource_) resource_->Release();
+    if (resource_) {
+      if (memory_mapped_) resource_->Unmap(0, nullptr);
+      resource_->Release();
+    }
+  }
+
+  inline char* memory() { return data_; }
+  inline D3D12_GPU_VIRTUAL_ADDRESS get_gpu_address() {
+    return resource_->GetGPUVirtualAddress();
+  }
+
+  inline void MapMemory() {
+    D3D12_RANGE read_range{0, 0};
+    resource_->Map(0, &read_range, reinterpret_cast<void**>(&data_));
+    memory_mapped_ = true;
+  }
+  inline void UnmapMemory() {
+    resource_->Unmap(0, nullptr);
+    memory_mapped_ = false;
   }
 
   // set_resource takes ownership over `resource` and releases it on
   // deconstruction
   inline void set_resource(T* resource) { resource_ = resource; }
   inline T* get_resource() { return resource_; }
+  inline T** get_resource_2r() { return &resource_; }
 
  private:
   Allocation alloc_;
+  char* data_ = nullptr;
   T* resource_ = nullptr;
+  bool memory_mapped_ = false;
   Allocator* mem_alloc_ = nullptr;
 
   template <typename U>

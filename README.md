@@ -1,14 +1,19 @@
+Got it! Here is the updated README with the requested changes:
+
+---
+
 # DirectX 12 Memory Allocator (dx12-ma)
 
 ## Overview
 
-The `dx12-ma` library provides a custom memory allocator for DirectX 12 (DX12). This allocator is designed to efficiently manage memory for DirectX 12 resources by allocating and freeing memory blocks from heaps. It supports dynamic heap management and handles memory leaks in debug builds.
+The `dx12-ma` library provides a custom memory allocator tailored for DirectX 12 (DX12). This allocator efficiently manages memory for DX12 resources by allocating and freeing memory blocks from heaps. It supports dynamic heap management, automatic resource deallocation, and debug features to handle memory leaks in debug builds.
 
 ## Features
 
-- **Dynamic Heap Management**: Allocates and manages memory blocks from DX12 heaps.
-- **Debugging Support**: Optionally tracks and reports memory leaks.
-- **Efficient Allocation and Deallocation**: Supports both allocation of new heaps and freeing of previously allocated memory blocks.
+- **Dynamic Heap Management**: Efficiently allocates and manages memory blocks from DX12 heaps, with customizable heap sizes and counts.
+- **Resource Wrapping**: Automatically manages the lifecycle of DirectX resources, including memory mapping and GPU virtual address retrieval.
+- **Debugging Support**: Tracks and reports memory leaks in debug builds, ensuring that all allocations are properly managed.
+- **Efficient Memory Operations**: Optimized for both allocation and deallocation, with support for block merging to minimize fragmentation.
 
 ## License
 
@@ -23,11 +28,11 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ### Building
 
-To build the `dx12-ma` library, include the source files in your project and link against the DirectX 12 SDK. Ensure that your build environment is set up to use C++17 or later.
+To build the `dx12-ma` library, include the source files in your project and link against the DirectX 12 SDK. Ensure that your build environment is configured to use C++17 or later.
 
 ### Configuration
 
-Before including the `dx12_ma.h` header file, you can define configuration options to customize the behavior of the allocator. The following options are available:
+Before including the `dx12_ma.h` header file, you can define configuration options to customize the allocator's behavior. The following options are available:
 
 ```cpp
 #define DX12_MA_HEAP_BLOCK_SIZE 128 * UINT16_MAX // Custom block size, default: 64 * UINT16_MAX
@@ -41,9 +46,9 @@ Before including the `dx12_ma.h` header file, you can define configuration optio
 
 ## Usage
 
-### Memory Allocator
+### Memory Allocation
 
-The `Allocator` class is responsible for managing memory allocations:
+The `Allocator` class manages memory allocations from DX12 heaps:
 
 ```cpp
 #include "dx12_ma.h" // Adjust the include path as necessary
@@ -51,35 +56,34 @@ The `Allocator` class is responsible for managing memory allocations:
 ID3D12Device* device; // Assume this is initialized
 dx12_ma::Allocator allocator(device);
 
-// Allocate memory
-dx12_ma::Allocation allocation = allocator.Allocate(size, D3D12_HEAP_TYPE_DEFAULT);
+// Allocate memory with optional alignment, see the API Reference
+dx12_ma::Allocation allocation = allocator.Allocate(size, D3D12_HEAP_TYPE_DEFAULT, alignment);
 
 // Free memory
 allocator.Free(allocation);
 ```
 
-### Resource Wrapper
+### Resource Management
 
-The `ResourceWrapper` class is used to manage DirectX resources with automatic deallocation:
+The `ResourceWrapper` class automatically manages DirectX resources, ensuring proper deallocation:
 
 ```cpp
 #include "dx12_ma.h" // Adjust the include path as necessary
 
-// Stack or heap allocated
 dx12_ma::Allocator allocator = /* allocator instance */;
 dx12_ma::Allocation allocation = /* some allocation */;
 
-// Assume ResourceType is a type with a Release() method, like ID3D12Resource
 ResourceType* resource = /* resource creation with `allocation` */;
+// Ensure resource has a Release function, like ID3D12Resource
 
 dx12_ma::ResourceWrapper<ResourceType> wrapper(allocation, &allocator);
 wrapper.set_resource(resource);
 
 // Access the resource
 ResourceType* myResource = wrapper.get_resource();
-
-// After wrapper goes out of scope, the allocation gets freed and the resource is released using the Release function
 ```
+
+When the `ResourceWrapper` goes out of scope, the allocation is automatically freed and the resource is released.
 
 ### Debugging
 
@@ -89,11 +93,11 @@ In debug builds (`DX12_MA_DEBUG` defined), the allocator reports memory leaks up
 allocator.PrintLeakedMemory();
 ```
 
-but `DX12_MA_DEBUG` has to be defined.
+The `DX12_MA_DEBUG` definition must be active for this feature.
 
 ## Time Complexity
 
-- **Allocation**: O(n), where `n` is the number of different heap types allocated. For example, with two CPU heaps (allocated first) and one GPU heap, the time complexity would be O(2) for GPU allocations and O(1) for CPU allocations.
+- **Allocation**: O(n), where `n` is the number of different heap types allocated. For example, with two CPU heaps (allocated first) and one GPU heap, the time complexity, for further allocations, would be O(2) for GPU allocations and O(1) for CPU allocations.
 - **Deallocation**: O(n) in the worst case, where `n` is the number of free blocks.
 - **Heap Management**: The management of heaps (`heaps_`) has a fixed upper limit (200 heaps), so operations involving heaps are effectively O(1).
 
@@ -104,13 +108,13 @@ but `DX12_MA_DEBUG` has to be defined.
 - **Constructor**: `Allocator(ID3D12Device* device)`
   - Initializes the allocator with a DirectX 12 device.
 
-- **Destructor**: Frees all allocated memory and, if `DX12_MA_DEBUG` is defined, prints any memory leaks.
+- **Destructor**: Frees all allocated memory and prints memory leaks if `DX12_MA_DEBUG` is defined.
 
-- **`Allocation Allocate(UINT64 size, D3D12_HEAP_TYPE heap_type)`**
-  - Allocates a memory block of the specified size and heap type.
+- **`Allocation Allocate(UINT64 size, D3D12_HEAP_TYPE heap_type, UINT64 alignment = 0)`**
+  - Allocates a memory block of the specified size and heap type. The `alignment` parameter is optional and specifies the alignment of the allocation. If set to 0, no alignment is enforced.
 
 - **`void Free(const Allocation& alloc)`**
-  - Frees a previously allocated memory block.
+  - Frees a previously allocated memory block and merges adjacent free blocks if possible.
 
 - **`uint32_t get_free_blocks_size()`**
   - Returns the count of all free memory blocks.
@@ -133,6 +137,15 @@ but `DX12_MA_DEBUG` has to be defined.
 
 - **`T* get_resource()`**
   - Returns the managed resource.
+
+- **`T** get_resource_2r()`**
+  - Returns a double reference to the managed resource.
+
+- **`void MapMemory()` and `void UnmapMemory()`**
+  - Maps and unmaps the resource memory, respectively.
+
+- **`D3D12_GPU_VIRTUAL_ADDRESS get_gpu_address()`**
+  - Returns the GPU virtual address of the resource.
 
 ## Contributing
 
