@@ -155,7 +155,6 @@ class Allocator {
   inline UINT32 get_allocated_heap_count() const { return heap_count_; }
 
   // Allocates a memory block from the specified heap using `heap_type`
-  // To disable the alignment, set 0 as `alignment`
   Allocation Allocate(UINT64 size, D3D12_HEAP_TYPE heap_type,
                       UINT64 alignment = 0) {
     if (size == 0) return {0};
