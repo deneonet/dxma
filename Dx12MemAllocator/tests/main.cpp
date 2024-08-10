@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 #include <wrl/client.h>
 
-// #define DX12_MA_DEBUG
+#define DX12_MA_DEBUG
 #include "dx12_ma.h"
 
 using Microsoft::WRL::ComPtr;
@@ -14,7 +14,7 @@ class MemAllocatorTest : public ::testing::Test {
   ComPtr<IDXGIFactory6> factory_ = nullptr;
   ComPtr<ID3D12Device> device_ = nullptr;
 
-  MemAllocator allocator_;
+  Allocator allocator_;
 
   void SetUp() override {
     ASSERT_TRUE(SUCCEEDED(CreateDXGIFactory(IID_PPV_ARGS(&factory_))));
@@ -38,6 +38,18 @@ TEST_F(MemAllocatorTest, AllocateCpuMemory) {
   ASSERT_GT(alloc.size, 0);
   ASSERT_EQ(alloc.heap_type, D3D12_HEAP_TYPE_UPLOAD);
   ASSERT_NE(alloc.heap, nullptr);
+}
+
+TEST_F(MemAllocatorTest, AllocateCpuMemoryAndAutoFree) {
+  // Allocate CPU memory
+  Allocation alloc = allocator_.Allocate(1024, D3D12_HEAP_TYPE_UPLOAD);  // 1 KB
+  ASSERT_GT(alloc.size, 0);
+  ASSERT_EQ(alloc.heap_type, D3D12_HEAP_TYPE_UPLOAD);
+  ASSERT_NE(alloc.heap, nullptr);
+
+  ResourceWrapper<ID3D12Resource> wrapper{alloc, &allocator_};
+  // In the console, in this test, there should be no memory leak warning
+  // anymore
 }
 
 TEST_F(MemAllocatorTest, AllocateGpuMemory) {

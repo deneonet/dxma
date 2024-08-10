@@ -41,6 +41,12 @@ namespace dx12_ma {
 // 64 * UINT16_MAX = 4194240 bytes = 4,19424 MB
 #endif
 
+#ifndef DX12_MA_MAX_HEAP_COUNT
+// Initial max heap count
+// Max of 200 heaps should be more than enough
+#define DX12_MA_MAX_HEAP_COUNT 200
+#endif
+
 #ifdef _DEBUG
 #define DX12_MA_DEBUG
 #endif
@@ -294,9 +300,8 @@ class Allocator {
   FreeBlock* head_ = nullptr;
   ID3D12Device* device_ = nullptr;
 
-  // Max of 200 heaps should be more than enough
-  ID3D12Heap* heaps_[200]{};
   UINT32 heap_count_ = 0;
+  ID3D12Heap* heaps_[DX12_MA_MAX_HEAP_COUNT]{};
 
 #ifdef DX12_MA_DEBUG
   std::unordered_set<Allocation, AllocationHasher> allocations_;

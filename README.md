@@ -25,9 +25,23 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 To build the `dx12-ma` library, include the source files in your project and link against the DirectX 12 SDK. Ensure that your build environment is set up to use C++17 or later.
 
-### Usage
+### Configuration
 
-#### Memory Allocator
+Before including the `dx12_ma.h` header file, you can define configuration options to customize the behavior of the allocator. The following options are available:
+
+```cpp
+#define DX12_MA_HEAP_BLOCK_SIZE 128 * UINT16_MAX // Custom block size, default: 64 * UINT16_MAX
+#define DX12_MA_MAX_HEAP_COUNT 100 // Custom max heap count, default: 200
+
+// Optionally enable debug mode, default: defined if in debug build
+#define DX12_MA_DEBUG
+
+#include "dx12_ma.h"
+```
+
+## Usage
+
+### Memory Allocator
 
 The `MemAllocator` class is responsible for managing memory allocations:
 
@@ -35,7 +49,7 @@ The `MemAllocator` class is responsible for managing memory allocations:
 #include "dx12_ma.h" // Adjust the include path as necessary
 
 ID3D12Device* device; // Assume this is initialized
-dx12_ma::Allocator allocator(device);
+dx12_ma::MemAllocator allocator(device);
 
 // Allocate memory
 dx12_ma::Allocation allocation = allocator.Allocate(size, D3D12_HEAP_TYPE_DEFAULT);
@@ -44,15 +58,15 @@ dx12_ma::Allocation allocation = allocator.Allocate(size, D3D12_HEAP_TYPE_DEFAUL
 allocator.Free(allocation);
 ```
 
-#### Resource Wrapper
+### Resource Wrapper
 
 The `ResourceWrapper` class is used to manage DirectX resources with automatic deallocation:
 
 ```cpp
 #include "dx12_ma.h" // Adjust the include path as necessary
 
-// Stack or Heap allocated
-dx12_ma::Allocator allocator = /* allocator instance */;
+// Stack or heap allocated
+dx12_ma::MemAllocator allocator = /* allocator instance */;
 dx12_ma::Allocation allocation = /* some allocation */;
 
 // Assume ResourceType is a type with a Release() method, like ID3D12Resource
@@ -69,26 +83,28 @@ ResourceType* myResource = wrapper.get_resource();
 
 ### Debugging
 
-In debug builds (`DX12_MA_DEBUG` defined), the allocator reports memory leaks upon destruction, this is done by printing leaked allocations to `std::cerr`. To manually print all memory allocations, use:
+In debug builds (`DX12_MA_DEBUG` defined), the allocator reports memory leaks upon destruction by printing leaked allocations to `std::cerr`. To manually print all memory allocations, use:
 
 ```cpp
 allocator.PrintLeakedMemory();
 ```
 
+but `DX12_MA_DEBUG` has to be defined.
+
 ## Time Complexity
 
-- **Allocation**: O(n), where `n` is the number of different heap types allocated. For example, with two CPU heaps and one GPU heap, the time complexity would be O(2) for GPU allocations and O(1) for CPU allocations.
+- **Allocation**: O(n), where `n` is the number of different heap types allocated. For example, with two CPU heaps (allocated first) and one GPU heap, the time complexity would be O(2) for GPU allocations and O(1) for CPU allocations.
 - **Deallocation**: O(n) in the worst case, where `n` is the number of free blocks.
 - **Heap Management**: The management of heaps (`heaps_`) has a fixed upper limit (200 heaps), so operations involving heaps are effectively O(1).
 
 ## API Reference
 
-### `Allocator`
+### `MemAllocator`
 
-- **Constructor**: `Allocator(ID3D12Device* device)`
+- **Constructor**: `MemAllocator(ID3D12Device* device)`
   - Initializes the allocator with a DirectX 12 device.
 
-- **Destructor**: Frees all allocated memory and, if `DX12_MA_DEBUG` defined, prints any memory leaks.
+- **Destructor**: Frees all allocated memory and, if `DX12_MA_DEBUG` is defined, prints any memory leaks.
 
 - **`Allocation Allocate(UINT64 size, D3D12_HEAP_TYPE heap_type)`**
   - Allocates a memory block of the specified size and heap type.
@@ -107,7 +123,7 @@ allocator.PrintLeakedMemory();
 
 ### `ResourceWrapper<T>`
 
-- **Constructor**: `ResourceWrapper(const Allocation& alloc, Allocator* mem_alloc)`
+- **Constructor**: `ResourceWrapper(const Allocation& alloc, MemAllocator* mem_alloc)`
   - Initializes the resource wrapper with an allocation and a memory allocator.
 
 - **Destructor**: Frees the allocation and releases the resource.
