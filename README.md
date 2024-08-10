@@ -1,7 +1,3 @@
-Got it! Here is the updated README with the requested changes:
-
----
-
 # DirectX 12 Memory Allocator (dx12-ma)
 
 ## Overview
