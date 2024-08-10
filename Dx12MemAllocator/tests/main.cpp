@@ -47,7 +47,7 @@ TEST_F(MemAllocatorTest, AllocateCpuMemoryAndAutoFree) {
   ASSERT_EQ(alloc.heap_type, D3D12_HEAP_TYPE_UPLOAD);
   ASSERT_NE(alloc.heap, nullptr);
 
-  ResourceWrapper<ID3D12Resource> wrapper{alloc, &allocator_};
+  ResourceWrapper wrapper{alloc, &allocator_};
   // In the console, in this test, there should be no memory leak warning
   // anymore
 }

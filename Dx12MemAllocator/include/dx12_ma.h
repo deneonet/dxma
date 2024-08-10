@@ -388,7 +388,6 @@ class Allocator {
 #endif
 };
 
-template <typename T>
 class ResourceWrapper {
  public:
   // ResourceWrapper does not take ownership of `mem_alloc` (`mem_alloc` is not
@@ -406,7 +405,7 @@ class ResourceWrapper {
   }
 
   // Copy Semantics removed, because calling `dx12_ma::Allocator::Free` multiple
-  // times with the same allocation, results into undefined behavior <- not if
+  // times with the same allocation, results into undefined behavior
 
   ResourceWrapper(const ResourceWrapper& other) = delete;
   ResourceWrapper& operator=(const ResourceWrapper& other) = delete;
@@ -461,32 +460,16 @@ class ResourceWrapper {
 
   // set_resource takes ownership over `resource` and releases it on
   // deconstruction
-  inline void set_resource(T* resource) { resource_ = resource; }
-  inline T* get_resource() { return resource_; }
-  inline T** get_resource_2r() { return &resource_; }
+  inline void set_resource(ID3D12Resource* resource) { resource_ = resource; }
+  inline ID3D12Resource* get_resource() { return resource_; }
+  inline ID3D12Resource** get_resource_2r() { return &resource_; }
 
  private:
   Allocation alloc_;
   char* data_ = nullptr;
-  T* resource_ = nullptr;
+  ID3D12Resource* resource_ = nullptr;
   bool memory_mapped_ = false;
   Allocator* mem_alloc_ = nullptr;
-
-  template <typename U>
-  struct has_release {
-   private:
-    template <typename C>
-    static auto test(int)
-        -> decltype(std::declval<C>().Release(), std::true_type{});
-
-    template <typename>
-    static std::false_type test(...) {}
-
-   public:
-    static constexpr bool value = decltype(test<U>(0))::value;
-  };
-
-  static_assert(has_release<T>::value, "Type T must have a Release method");
 };
 
 }  // namespace dx12_ma

@@ -69,14 +69,13 @@ The `ResourceWrapper` class automatically manages DirectX resources, ensuring pr
 dx12_ma::Allocator allocator = /* allocator instance */;
 dx12_ma::Allocation allocation = /* some allocation */;
 
-ResourceType* resource = /* resource creation with `allocation` */;
-// Ensure resource has a Release function, like ID3D12Resource
+ID3D12Resource* resource = /* resource creation with `allocation` */;
 
-dx12_ma::ResourceWrapper<ResourceType> wrapper(allocation, &allocator);
+dx12_ma::ResourceWrapper wrapper(allocation, &allocator);
 wrapper.set_resource(resource);
 
 // Access the resource
-ResourceType* myResource = wrapper.get_resource();
+ID3D12Resource* myResource = wrapper.get_resource();
 ```
 
 When the `ResourceWrapper` goes out of scope, the allocation is automatically freed and the resource is released.
@@ -121,20 +120,20 @@ The `DX12_MA_DEBUG` definition must be active for this feature.
 - **`UINT32 get_allocated_heap_count() const`**
   - Returns the count of all allocated heaps.
 
-### `ResourceWrapper<T>`
+### `ResourceWrapper`
 
 - **Constructor**: `ResourceWrapper(const Allocation& alloc, Allocator* mem_alloc)`
   - Initializes the resource wrapper with an allocation and a memory allocator.
 
 - **Destructor**: Frees the allocation and releases the resource.
 
-- **`void set_resource(T* resource)`**
+- **`void set_resource(ID3D12Resource* resource)`**
   - Sets the resource and takes ownership.
 
-- **`T* get_resource()`**
+- **`ID3D12Resource* get_resource()`**
   - Returns the managed resource.
 
-- **`T** get_resource_2r()`**
+- **`ID3D12Resource** get_resource_2r()`**
   - Returns a double reference to the managed resource.
 
 - **`void MapMemory()` and `void UnmapMemory()`**
