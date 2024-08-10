@@ -43,13 +43,13 @@ Before including the `dx12_ma.h` header file, you can define configuration optio
 
 ### Memory Allocator
 
-The `MemAllocator` class is responsible for managing memory allocations:
+The `Allocator` class is responsible for managing memory allocations:
 
 ```cpp
 #include "dx12_ma.h" // Adjust the include path as necessary
 
 ID3D12Device* device; // Assume this is initialized
-dx12_ma::MemAllocator allocator(device);
+dx12_ma::Allocator allocator(device);
 
 // Allocate memory
 dx12_ma::Allocation allocation = allocator.Allocate(size, D3D12_HEAP_TYPE_DEFAULT);
@@ -66,7 +66,7 @@ The `ResourceWrapper` class is used to manage DirectX resources with automatic d
 #include "dx12_ma.h" // Adjust the include path as necessary
 
 // Stack or heap allocated
-dx12_ma::MemAllocator allocator = /* allocator instance */;
+dx12_ma::Allocator allocator = /* allocator instance */;
 dx12_ma::Allocation allocation = /* some allocation */;
 
 // Assume ResourceType is a type with a Release() method, like ID3D12Resource
@@ -99,9 +99,9 @@ but `DX12_MA_DEBUG` has to be defined.
 
 ## API Reference
 
-### `MemAllocator`
+### `Allocator`
 
-- **Constructor**: `MemAllocator(ID3D12Device* device)`
+- **Constructor**: `Allocator(ID3D12Device* device)`
   - Initializes the allocator with a DirectX 12 device.
 
 - **Destructor**: Frees all allocated memory and, if `DX12_MA_DEBUG` is defined, prints any memory leaks.
@@ -123,7 +123,7 @@ but `DX12_MA_DEBUG` has to be defined.
 
 ### `ResourceWrapper<T>`
 
-- **Constructor**: `ResourceWrapper(const Allocation& alloc, MemAllocator* mem_alloc)`
+- **Constructor**: `ResourceWrapper(const Allocation& alloc, Allocator* mem_alloc)`
   - Initializes the resource wrapper with an allocation and a memory allocator.
 
 - **Destructor**: Frees the allocation and releases the resource.
