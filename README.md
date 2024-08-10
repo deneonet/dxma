@@ -93,7 +93,7 @@ The `DX12_MA_DEBUG` definition must be active for this feature.
 
 ## Time Complexity
 
-- **Allocation**: O(n), where `n` is the number of different heap types allocated. For example, with two CPU heaps (allocated first) and one GPU heap, the time complexity, for further allocations, would be O(2) for GPU allocations and O(1) for CPU allocations.
+- **Allocation**: O(n), where `n` is the number of different heap types allocated. For example, with two CPU heaps (allocated first) and one GPU heap, the time complexity, for further allocations, would be O(1) for GPU allocations and O(2) for CPU allocations.
 - **Deallocation**: O(n) in the worst case, where `n` is the number of free blocks.
 - **Heap Management**: The management of heaps (`heaps_`) has a fixed upper limit (200 heaps), so operations involving heaps are effectively O(1).
 
