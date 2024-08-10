@@ -61,6 +61,62 @@ struct Allocation {
 
   ID3D12Heap* heap = nullptr;
 
+  Allocation(UINT64 size, UINT64 offset, D3D12_HEAP_TYPE heap_type,
+             UINT32 heap_index, ID3D12Heap* heap)
+      : size(size),
+        offset(offset),
+        heap_type(heap_type),
+        heap_index(heap_index),
+        heap(heap) {}
+
+  Allocation(const Allocation& other)
+      : size(other.size),
+        offset(other.offset),
+        heap_type(other.heap_type),
+        heap_index(other.heap_index),
+        heap(other.heap) {}
+
+  Allocation& operator=(const Allocation& other) {
+    if (this != &other) {
+      size = other.size;
+      offset = other.offset;
+      heap_type = other.heap_type;
+      heap_index = other.heap_index;
+      heap = other.heap;
+    }
+    return *this;
+  }
+
+  Allocation(Allocation&& other) noexcept
+      : size(other.size),
+        offset(other.offset),
+        heap_type(other.heap_type),
+        heap_index(other.heap_index),
+        heap(other.heap) {
+    other.size = 0;
+    other.offset = 0;
+    other.heap_type = D3D12_HEAP_TYPE_DEFAULT;
+    other.heap_index = 0;
+    other.heap = nullptr;
+  }
+
+  Allocation& operator=(Allocation&& other) noexcept {
+    if (this != &other) {
+      size = other.size;
+      offset = other.offset;
+      heap_type = other.heap_type;
+      heap_index = other.heap_index;
+      heap = other.heap;
+
+      other.size = 0;
+      other.offset = 0;
+      other.heap_type = D3D12_HEAP_TYPE_DEFAULT;
+      other.heap_index = 0;
+      other.heap = nullptr;
+    }
+    return *this;
+  }
+
   bool operator==(const Allocation& other) const {
     return size == other.size && offset == other.offset &&
            heap_index ==
@@ -162,7 +218,7 @@ class Allocator {
   // Allocates a memory block from the specified heap using `heap_type`
   Allocation Allocate(UINT64 size, D3D12_HEAP_TYPE heap_type,
                       UINT64 alignment = 0) {
-    if (size == 0) return {0};
+    if (size == 0) return {0, 0, D3D12_HEAP_TYPE_DEFAULT, 0, nullptr};
     size = alignment == 0 ? size : (size + alignment - 1) & ~(alignment - 1);
 
     FreeBlock* ptr = head_;
@@ -230,7 +286,9 @@ class Allocator {
 
     ID3D12Heap* new_heap = nullptr;
     HRESULT hr = device_->CreateHeap(&heap_desc, IID_PPV_ARGS(&new_heap));
-    if (FAILED(hr)) return {0};
+    assert(SUCCEEDED(hr));
+    if (FAILED(hr)) return {0, 0, D3D12_HEAP_TYPE_DEFAULT, 0, nullptr};
+
     heaps_[heap_count_] = new_heap;
 
     // Create a new free block and reserve the allocation size
@@ -252,9 +310,17 @@ class Allocator {
 
   // Frees a previously allocated block and merges adjacent free blocks if
   // possible
-  void Free(const Allocation& alloc) {
+  void Free(Allocation& alloc) {
+    if (alloc.size == 0 || alloc.heap == nullptr) {
+      assert(!"Invalid `alloc` passed to `dx12_ma::Allocator::Free` -> `size` equals 0 or `heap` equals nullptr");
+      return;
+    }
+
 #ifdef DX12_MA_DEBUG
-    allocations_.erase(alloc);
+    if (allocations_.erase(alloc) != 1) {
+      assert(!"Invalid `alloc` passed to `dx12_ma::Allocator::Free` -> `alloc` was never allocated by `dx12_ma::Allocator::Allocate`");
+      return;
+    }
 #endif
 
     FreeBlock* new_block =
@@ -277,6 +343,13 @@ class Allocator {
       prev = current;
       current = current->next;
     }
+
+    // Reset allocation to prevent further free's using the same allocation
+    alloc.size = 0;
+    alloc.offset = 0;
+    alloc.heap_type = D3D12_HEAP_TYPE_DEFAULT;
+    alloc.heap_index = 0;
+    alloc.heap = nullptr;
 
     // Try merging with previous block
     if (prev && prev->offset + prev->size == new_block->offset &&
@@ -321,8 +394,8 @@ class ResourceWrapper {
   // ResourceWrapper does not take ownership of `mem_alloc` (`mem_alloc` is not
   // going to be released and has to be valid for the lifetime of
   // ResourceWrapper)
-  ResourceWrapper(const Allocation& alloc, Allocator* mem_alloc)
-      : alloc_(alloc), mem_alloc_(mem_alloc) {}
+  ResourceWrapper(Allocation& alloc, Allocator* mem_alloc)
+      : alloc_(std::move(alloc)), mem_alloc_(mem_alloc) {}
   ~ResourceWrapper() {
     if (mem_alloc_ == nullptr) return;
     mem_alloc_->Free(alloc_);
@@ -332,17 +405,20 @@ class ResourceWrapper {
     }
   }
 
-  ResourceWrapper(const ResourceWrapper&) = delete;
-  ResourceWrapper& operator=(const ResourceWrapper&) = delete;
+  // Copy Semantics removed, because calling `dx12_ma::Allocator::Free` multiple
+  // times with the same allocation, results into undefined behavior <- not if
+
+  ResourceWrapper(const ResourceWrapper& other) = delete;
+  ResourceWrapper& operator=(const ResourceWrapper& other) = delete;
 
   ResourceWrapper(ResourceWrapper&& other) noexcept
       : alloc_(std::move(other.alloc_)),
         data_(other.data_),
-        resouce_(other.resource_),
+        resource_(other.resource_),
         memory_mapped_(other.memory_mapped_),
         mem_alloc_(other.mem_alloc_) {
     other.data_ = nullptr;
-    other.resouce_ = nullptr;
+    other.resource_ = nullptr;
     other.mem_alloc_ = nullptr;
     other.memory_mapped_ = false;
   }
@@ -351,12 +427,12 @@ class ResourceWrapper {
     if (this != &other) {
       alloc_ = std::move(other.alloc_);
       data_ = other.data_;
-      resouce_ = other.resource_;
+      resource_ = other.resource_;
       memory_mapped_ = other.memory_mapped_;
       mem_alloc_ = other.mem_alloc_;
 
       other.data_ = nullptr;
-      other.resouce_ = nullptr;
+      other.resource_ = nullptr;
       other.mem_alloc_ = nullptr;
       other.memory_mapped_ = false;
     }
@@ -370,7 +446,8 @@ class ResourceWrapper {
 
   inline void MapMemory() {
     D3D12_RANGE read_range{0, 0};
-    resource_->Map(0, &read_range, reinterpret_cast<void**>(&data_));
+    assert(SUCCEEDED(
+        resource_->Map(0, &read_range, reinterpret_cast<void**>(&data_))));
     memory_mapped_ = true;
   }
   inline void UnmapMemory() {
