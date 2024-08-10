@@ -89,6 +89,12 @@ struct FreeBlock {
   FreeBlock* next = nullptr;
   ID3D12Heap* heap = nullptr;
 
+  FreeBlock(const FreeBlock&) = delete;
+  FreeBlock& operator=(const FreeBlock&) = delete;
+
+  FreeBlock(FreeBlock&& other) noexcept = delete;
+  FreeBlock& operator=(FreeBlock&& other) noexcept = delete;
+
   FreeBlock(UINT64 size, UINT64 offset, D3D12_HEAP_TYPE heap_type,
             UINT32 heap_index, FreeBlock* next, ID3D12Heap* heap)
       : size(size),
@@ -341,7 +347,7 @@ class ResourceWrapper {
     other.memory_mapped_ = false;
   }
 
-  Allocation& operator=(Allocation&& other) noexcept {
+  ResourceWrapper& operator=(ResourceWrapper&& other) noexcept {
     if (this != &other) {
       alloc_ = std::move(other.alloc_);
       data_ = other.data_;
