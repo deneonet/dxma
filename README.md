@@ -92,7 +92,12 @@ The `DX12_MA_DEBUG` definition must be active for this feature.
 
 ## Time Complexity
 
-- **Allocation**: O(n), where `n` is the number of different heap types allocated. For example, with two CPU heaps (allocated first) and one GPU heap, the time complexity, for further allocations, would be O(1) for GPU allocations and O(2) for CPU allocations.
+- **Allocation**: (O(n)), where (n) is the number of different heap types that have been allocated.
+   - The allocator uses a linked list with stack-like behavior, where the most recently allocated heap is at the head.
+   - For example, if two CPU heaps are allocated first (becoming the initial head) and then a GPU heap is allocated (becoming the new head):
+       - Allocating from the GPU heap (the current head) has a time complexity of (O(1)).
+       - Allocating from a CPU heap (now further down the linked list) has a time complexity of (O(2)), as the allocator must traverse past the GPU heap to find the CPU heap.
+   - In general, the time complexity for allocation is (O(k)), where (k) is the position of the heap type in the linked list, with the head being (O(1)) and increasing linearly as you move down the list.
 - **Deallocation**: O(n) in the worst case, where `n` is the number of free blocks.
 - **Heap Management**: The management of heaps (`heaps_`) has a fixed upper limit (200 heaps), so operations involving heaps are effectively O(1).
 
@@ -145,3 +150,8 @@ The `DX12_MA_DEBUG` definition must be active for this feature.
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request on [GitHub](https://github.com/deneonet/dx12-ma).
+
+## To-dos
+
+- Constant time complexity O(1), for allocations
+- Function to retrieve the active allocations
