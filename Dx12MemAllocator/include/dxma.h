@@ -47,6 +47,13 @@ SOFTWARE.
 #define DXMA_DEBUG
 #endif
 
+// Information required for memory allocation
+struct DxmaAllocationInfo {
+  UINT64 size = 0;                                 // Size of the allocation
+  D3D12_HEAP_TYPE type = D3D12_HEAP_TYPE_DEFAULT;  // Type of heap
+  UINT64 alignment = 0;                            // Alignment requirement
+};
+
 namespace dxma_detail {
 
 // Represents a memory allocation within a heap
@@ -62,14 +69,31 @@ struct Allocation {
       true;  // Whether the resource is managed by this allocation
   bool memory_mapped_ = false;  // Whether the resource is memory-mapped
 
+#ifdef DXMA_DEBUG
+  const char* file_ = nullptr;  // File where the allocation was made
+  int line_ = 0;                // Line where the allocation was made
+#endif
+
  public:
   Allocation(UINT64 size, UINT64 offset, D3D12_HEAP_TYPE type,
-             UINT32 heap_index, ID3D12Heap* heap)
+             UINT32 heap_index, ID3D12Heap* heap
+#ifdef DXMA_DEBUG
+             ,
+             const char* file, int line
+#endif
+             )
       : size_(size),
         offset_(offset),
         heap_type_(type),
         heap_index_(heap_index),
-        heap_(heap) {}
+        heap_(heap)
+#ifdef DXMA_DEBUG
+        ,
+        file_(file),
+        line_(line)
+#endif
+  {
+  }
 
   ~Allocation() {
     if (manage_resource_ && resource_ != nullptr) {
@@ -86,6 +110,11 @@ struct Allocation {
   ID3D12Heap* GetHeap() const { return heap_; }
   ID3D12Resource* GetResource() const { return resource_; }
   bool IsMemoryMapped() const { return memory_mapped_; }
+
+#ifdef DXMA_DEBUG
+  const char* GetFile() const { return file_; }
+  int GetLine() const { return line_; }
+#endif
 
   // Setters
   void SetResource(ID3D12Resource* resource, bool manage_resource = true) {
@@ -135,7 +164,6 @@ struct FreeBlock {
   void SetNext(FreeBlock* next) { next_ = next; }
 };
 
-#ifdef DXMA_DEBUG
 // Hash function for allocations (used in debug mode)
 struct AllocationHasher {
   size_t operator()(Allocation* a) const {
@@ -144,7 +172,6 @@ struct AllocationHasher {
     return ho ^ (hi << 1);
   }
 };
-#endif
 
 // Main allocator class for managing memory allocations
 class Allocator {
@@ -186,9 +213,8 @@ class Allocator {
 #ifdef DXMA_DEBUG
     for (Allocation* alloc : allocations_) {
       std::cerr << "[DXMA] Memory Leaked: " << alloc->GetSize()
-                << " bytes at offset " << alloc->GetOffset()
-                << " with heap type/index: " << alloc->GetHeapType() << "/"
-                << alloc->GetHeapIndex() << "\n";
+                << " bytes allocated at " << alloc->GetFile() << ":"
+                << alloc->GetLine() << "\n";
     }
 #endif
   }
@@ -237,10 +263,131 @@ class Allocator {
     return 0;
 #endif
   }
+
+  // Get all active allocations (debug mode only)
+  std::unordered_set<Allocation*, AllocationHasher> GetAllocations() {
+#ifdef DXMA_DEBUG
+    return allocations_;
+#else
+    return std::unordered_set<Allocation*, AllocationHasher>();
+#endif
+  }
 };
 
 // Define handle types for the library user
 #define DEFINE_DXMA_HANDLE(name) typedef dxma_detail::name* Dxma##name;
+
+void dxmaAllocateImpl(Allocator* allocator,
+                      const DxmaAllocationInfo& alloc_info,
+                      Allocation** allocation
+#ifdef DXMA_DEBUG
+                      ,
+                      const char* file, int line
+#endif
+) {
+  UINT64 size = alloc_info.size;
+  D3D12_HEAP_TYPE type = alloc_info.type;
+  UINT64 alignment = alloc_info.alignment;
+
+  if (size == 0) return;
+  size = alignment == 0 ? size : (size + alignment - 1) & ~(alignment - 1);
+
+  FreeBlock* ptr = allocator->GetHead();
+  FreeBlock* prev = nullptr;
+
+  while (ptr) {
+    UINT64 ptr_size = ptr->GetSize();
+    if (ptr->GetHeapType() != type) ptr_size = 0;
+
+    if (ptr_size >= size) {
+      UINT64 ptr_offset = ptr->GetOffset();
+      ID3D12Heap* ptr_heap = ptr->GetHeap();
+      UINT32 ptr_heap_index = ptr->GetHeapIndex();
+
+      if (ptr_size == size) {
+        // Exact match: remove the free block
+        if (prev) {
+          prev->SetNext(ptr->GetNext());
+        } else {
+          allocator->SetHead(ptr->GetNext());
+        }
+        delete ptr;
+
+        *allocation =
+            new Allocation(size, ptr_offset, type, ptr_heap_index, ptr_heap
+#ifdef DXMA_DEBUG
+                           ,
+                           file, line
+#endif
+            );
+#ifdef DXMA_DEBUG
+        allocator->AddAllocation(*allocation);
+#endif
+        return;
+      }
+
+      // Split the free block
+      ptr->SetSize(ptr_size - size);
+      ptr->SetOffset(ptr_offset + size);
+
+      *allocation =
+          new Allocation(size, ptr_offset, type, ptr_heap_index, ptr_heap
+#ifdef DXMA_DEBUG
+                         ,
+                         file, line
+#endif
+          );
+#ifdef DXMA_DEBUG
+      allocator->AddAllocation(*allocation);
+#endif
+      return;
+    }
+
+    prev = ptr;
+    ptr = ptr->GetNext();
+  }
+
+  // Out of memory: allocate a new heap
+  UINT64 heap_block_size = DXMA_HEAP_BLOCK_SIZE;
+  if (heap_block_size - size <= 0) heap_block_size = size * 4;
+
+  ID3D12Device* device = allocator->GetDevice();
+  assert(device);
+
+  D3D12_HEAP_DESC heap_desc{};
+  heap_desc.SizeInBytes = heap_block_size;
+  heap_desc.Flags = D3D12_HEAP_FLAG_NONE;
+  heap_desc.Properties.Type = type;
+  heap_desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+
+  ID3D12Heap* new_heap = nullptr;
+  HRESULT hr = device->CreateHeap(&heap_desc, IID_PPV_ARGS(&new_heap));
+  assert(SUCCEEDED(hr));
+
+  if (FAILED(hr)) return;
+
+  UINT32 heap_count = allocator->GetHeapCount();
+  ID3D12Heap** heaps = allocator->GetHeaps();
+  heaps[heap_count] = new_heap;
+
+  // Create a new free block
+  FreeBlock* new_block =
+      new FreeBlock(heap_block_size - size, size, type, heap_count,
+                    allocator->GetHead(), new_heap);
+
+  allocator->SetHead(new_block);
+  allocator->IncrementHeapCount();
+
+  *allocation = new Allocation(size, 0, type, heap_count, new_heap
+#ifdef DXMA_DEBUG
+                               ,
+                               file, line
+#endif
+  );
+#ifdef DXMA_DEBUG
+  allocator->AddAllocation(*allocation);
+#endif
+}
 
 }  // namespace dxma_detail
 
@@ -278,13 +425,6 @@ void dxmaDestroyResource(DxmaAllocation allocation, ID3D12Resource* resource) {
   allocation->SetResource(nullptr, false);
 }
 
-// Information required for memory allocation
-struct DxmaAllocationInfo {
-  UINT64 size = 0;                                 // Size of the allocation
-  D3D12_HEAP_TYPE type = D3D12_HEAP_TYPE_DEFAULT;  // Type of heap
-  UINT64 alignment = 0;                            // Alignment requirement
-};
-
 // Map memory for CPU access
 HRESULT dxmaMapMemory(DxmaAllocation allocation, void** data) {
   if (!allocation->IsMemoryMapped() && allocation->GetResource() != nullptr) {
@@ -307,98 +447,19 @@ void dxmaUnmapMemory(DxmaAllocation allocation) {
   }
 }
 
+#ifdef DXMA_DEBUG
 // Allocate memory from the allocator
-void dxmaAllocate(DxmaAllocator allocator, const DxmaAllocationInfo& alloc_info,
-                  DxmaAllocation* allocation) {
-  UINT64 size = alloc_info.size;
-  D3D12_HEAP_TYPE type = alloc_info.type;
-  UINT64 alignment = alloc_info.alignment;
-
-  if (size == 0) return;
-  size = alignment == 0 ? size : (size + alignment - 1) & ~(alignment - 1);
-
-  DxmaFreeBlock ptr = allocator->GetHead();
-  DxmaFreeBlock prev = nullptr;
-
-  while (ptr) {
-    UINT64 ptr_size = ptr->GetSize();
-    if (ptr->GetHeapType() != type) ptr_size = 0;
-
-    if (ptr_size >= size) {
-      UINT64 ptr_offset = ptr->GetOffset();
-      ID3D12Heap* ptr_heap = ptr->GetHeap();
-      UINT32 ptr_heap_index = ptr->GetHeapIndex();
-
-      if (ptr_size == size) {
-        // Exact match: remove the free block
-        if (prev) {
-          prev->SetNext(ptr->GetNext());
-        } else {
-          allocator->SetHead(ptr->GetNext());
-        }
-        delete ptr;
-
-        *allocation = new dxma_detail::Allocation(size, ptr_offset, type,
-                                                  ptr_heap_index, ptr_heap);
-#ifdef DXMA_DEBUG
-        allocator->AddAllocation(*allocation);
-#endif
-        return;
-      }
-
-      // Split the free block
-      ptr->SetSize(ptr_size - size);
-      ptr->SetOffset(ptr_offset + size);
-
-      *allocation = new dxma_detail::Allocation(size, ptr_offset, type,
-                                                ptr_heap_index, ptr_heap);
-#ifdef DXMA_DEBUG
-      allocator->AddAllocation(*allocation);
-#endif
-      return;
-    }
-
-    prev = ptr;
-    ptr = ptr->GetNext();
-  }
-
-  // Out of memory: allocate a new heap
-  UINT64 heap_block_size = DXMA_HEAP_BLOCK_SIZE;
-  if (heap_block_size - size <= 0) heap_block_size = size * 4;
-
-  ID3D12Device* device = allocator->GetDevice();
-  assert(device);
-
-  D3D12_HEAP_DESC heap_desc{};
-  heap_desc.SizeInBytes = heap_block_size;
-  heap_desc.Flags = D3D12_HEAP_FLAG_NONE;
-  heap_desc.Properties.Type = type;
-  heap_desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-
-  ID3D12Heap* new_heap = nullptr;
-  HRESULT hr = device->CreateHeap(&heap_desc, IID_PPV_ARGS(&new_heap));
-  assert(SUCCEEDED(hr));
-
-  if (FAILED(hr)) return;
-
-  UINT32 heap_count = allocator->GetHeapCount();
-  ID3D12Heap** heaps = allocator->GetHeaps();
-  heaps[heap_count] = new_heap;
-
-  // Create a new free block
-  DxmaFreeBlock new_block =
-      new dxma_detail::FreeBlock(heap_block_size - size, size, type, heap_count,
-                                 allocator->GetHead(), new_heap);
-
-  allocator->SetHead(new_block);
-  allocator->IncrementHeapCount();
-
-  *allocation =
-      new dxma_detail::Allocation(size, 0, type, heap_count, new_heap);
-#ifdef DXMA_DEBUG
-  allocator->AddAllocation(*allocation);
-#endif
+#define dxmaAllocate(allocator, alloc_info, allocation)                      \
+  dxma_detail::dxmaAllocateImpl(allocator, alloc_info, allocation, __FILE__, \
+                                __LINE__)
+#else
+// Allocate memory from the allocator
+inline void dxmaAllocate(DxmaAllocator allocator,
+                         const DxmaAllocationInfo& alloc_info,
+                         DxmaAllocation* allocation) {
+  dxma_detail::dxmaAllocateImpl(allocator, alloc_info, allocation);
 }
+#endif
 
 // Free a memory allocation
 void dxmaFree(DxmaAllocator allocator, DxmaAllocation allocation,

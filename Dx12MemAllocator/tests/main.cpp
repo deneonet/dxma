@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 #include <wrl/client.h>
 
-#define DX12_MA_DEBUG
+#define DXMA_DEBUG
 #include "dxma.h"
 
 using Microsoft::WRL::ComPtr;
