@@ -53,6 +53,10 @@ ID3D12Device* device; // Assume this is initialized
 DxmaAllocator allocator;
 dxmaCreateAllocator(&allocator, device);
 
+// ...
+
+// Don't forget to: `dxmaDestroyAllocator(allocator);`, at the end of usage
+
 // Allocate memory
 DxmaAllocationInfo allocationInfo{};
 allocationInfo.size = 1024; // 1 KB
