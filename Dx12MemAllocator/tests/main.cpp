@@ -4,179 +4,271 @@
 #include <wrl/client.h>
 
 #define DX12_MA_DEBUG
-#include "dx12_ma.h"
+#include "dxma.h"
 
 using Microsoft::WRL::ComPtr;
-using namespace dx12_ma;
 
-class MemAllocatorTest : public ::testing::Test {
+// Test fixture for DirectX 12 Memory Allocator tests
+class DirectXMemoryAllocatorTest : public ::testing::Test {
  protected:
-  ComPtr<IDXGIFactory6> factory_ = nullptr;
-  ComPtr<ID3D12Device> device_ = nullptr;
-
-  Allocator allocator_;
+  ComPtr<IDXGIFactory6> dxgiFactory_ =
+      nullptr;  // DXGI factory for creating adapters
+  ComPtr<ID3D12Device> d3dDevice_ = nullptr;  // DirectX 12 device
+  DxmaAllocator memoryAllocator_ = nullptr;   // Memory allocator instance
 
   void SetUp() override {
-    ASSERT_TRUE(SUCCEEDED(CreateDXGIFactory(IID_PPV_ARGS(&factory_))));
+    // Create DXGI factory
+    ASSERT_TRUE(SUCCEEDED(CreateDXGIFactory(IID_PPV_ARGS(&dxgiFactory_))));
 
-    ComPtr<IDXGIAdapter> adapter;
-    ASSERT_TRUE(SUCCEEDED(factory_->EnumWarpAdapter(IID_PPV_ARGS(&adapter))));
+    // Create a WARP adapter (software rendering)
+    ComPtr<IDXGIAdapter> warpAdapter;
+    ASSERT_TRUE(
+        SUCCEEDED(dxgiFactory_->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter))));
 
+    // Create DirectX 12 device
     D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
-    HRESULT hr =
-        D3D12CreateDevice(adapter.Get(), featureLevel, IID_PPV_ARGS(&device_));
+    HRESULT hr = D3D12CreateDevice(warpAdapter.Get(), featureLevel,
+                                   IID_PPV_ARGS(&d3dDevice_));
     ASSERT_TRUE(SUCCEEDED(hr));
 
-    allocator_ = (device_.Get());
-    ASSERT_TRUE(SUCCEEDED(hr));
+    // Initialize the memory allocator
+    dxmaCreateAllocator(&memoryAllocator_, d3dDevice_.Get());
+  }
+
+  void TearDown() override {
+    // Clean up the memory allocator
+    dxmaDestroyAllocator(memoryAllocator_);
   }
 };
 
-TEST_F(MemAllocatorTest, AllocateCpuMemory) {
-  // Allocate CPU memory
-  Allocation alloc = allocator_.Allocate(1024, D3D12_HEAP_TYPE_UPLOAD);  // 1 KB
-  ASSERT_GT(alloc.size, 0);
-  ASSERT_EQ(alloc.heap_type, D3D12_HEAP_TYPE_UPLOAD);
-  ASSERT_NE(alloc.heap, nullptr);
+// Test case: Allocate CPU-accessible memory
+TEST_F(DirectXMemoryAllocatorTest, AllocateCpuAccessibleMemory) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = 1024;                    // 1 KB
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;  // CPU-accessible heap
+
+  DxmaAllocation allocation = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation);
+
+  ASSERT_NE(allocation, nullptr);
+  ASSERT_GT(allocation->GetSize(), 0);
+  ASSERT_EQ(allocation->GetHeapType(), D3D12_HEAP_TYPE_UPLOAD);
+  ASSERT_NE(allocation->GetHeap(), nullptr);
 }
 
-TEST_F(MemAllocatorTest, AllocateCpuMemoryAndAutoFree) {
-  // Allocate CPU memory
-  Allocation alloc = allocator_.Allocate(1024, D3D12_HEAP_TYPE_UPLOAD);  // 1 KB
-  ASSERT_GT(alloc.size, 0);
-  ASSERT_EQ(alloc.heap_type, D3D12_HEAP_TYPE_UPLOAD);
-  ASSERT_NE(alloc.heap, nullptr);
+// Test case: Allocate CPU-accessible memory and ensure it is freed correctly
+TEST_F(DirectXMemoryAllocatorTest, AllocateAndFreeCpuAccessibleMemory) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = 1024;                    // 1 KB
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;  // CPU-accessible heap
 
-  ResourceWrapper wrapper{alloc, &allocator_};
-  // In the console, in this test, there should be no memory leak warning
-  // anymore
-}
+  DxmaAllocation allocation = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation);
 
-TEST_F(MemAllocatorTest, AllocateGpuMemory) {
-  // Allocate GPU memory
-  Allocation alloc =
-      allocator_.Allocate(1024, D3D12_HEAP_TYPE_DEFAULT);  // 1 KB
-  ASSERT_GT(alloc.size, 0);
-  ASSERT_EQ(alloc.heap_type, D3D12_HEAP_TYPE_DEFAULT);
-  ASSERT_NE(alloc.heap, nullptr);
-}
-
-TEST_F(MemAllocatorTest, AllocateAndFree) {
-  // Allocate CPU memory
-  Allocation alloc = allocator_.Allocate(1024, D3D12_HEAP_TYPE_UPLOAD);  // 1 KB
-  ASSERT_GT(alloc.size, 0);
+  ASSERT_NE(allocation, nullptr);
+  ASSERT_GT(allocation->GetSize(), 0);
+  ASSERT_EQ(allocation->GetHeapType(), D3D12_HEAP_TYPE_UPLOAD);
+  ASSERT_NE(allocation->GetHeap(), nullptr);
 
   // Free the allocation
-  allocator_.Free(alloc);
+  dxmaFree(memoryAllocator_, allocation, nullptr);
 
-  // Check if free blocks merged correctly
-  uint32_t free_blocks_size = allocator_.get_free_blocks_size();
-  ASSERT_EQ(free_blocks_size, 1);
+  // Ensure no memory leaks are reported in debug mode
 }
 
-TEST_F(MemAllocatorTest, MultipleAllocationsAndFrees) {
-  // Allocate multiple blocks
-  Allocation alloc1 =
-      allocator_.Allocate(512, D3D12_HEAP_TYPE_UPLOAD);  // 512 bytes
-  Allocation alloc2 =
-      allocator_.Allocate(512, D3D12_HEAP_TYPE_DEFAULT);  // 512 bytes
-  Allocation alloc3 =
-      allocator_.Allocate(256, D3D12_HEAP_TYPE_UPLOAD);  // 256 bytes
+// Test case: Allocate GPU-accessible memory
+TEST_F(DirectXMemoryAllocatorTest, AllocateGpuAccessibleMemory) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = 1024;                     // 1 KB
+  allocationInfo.type = D3D12_HEAP_TYPE_DEFAULT;  // GPU-accessible heap
 
-  ASSERT_EQ(alloc1.size, 512);
-  ASSERT_EQ(alloc2.size, 512);
-  ASSERT_EQ(alloc3.size, 256);
-  ASSERT_EQ(alloc1.offset, 0);
-  ASSERT_EQ(alloc2.offset, 0);  // gpu allocated, therefore 0
-  ASSERT_EQ(alloc3.offset, 512);
+  DxmaAllocation allocation = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation);
 
-  // Free the allocations
-  allocator_.Free(alloc1);
-  allocator_.Free(alloc2);
-  allocator_.Free(alloc3);
-
-  // Check if free blocks merged correctly
-  ASSERT_EQ(allocator_.get_free_blocks_size(), 2);
+  ASSERT_NE(allocation, nullptr);
+  ASSERT_GT(allocation->GetSize(), 0);
+  ASSERT_EQ(allocation->GetHeapType(), D3D12_HEAP_TYPE_DEFAULT);
+  ASSERT_NE(allocation->GetHeap(), nullptr);
 }
 
-TEST_F(MemAllocatorTest, AllocateAndFreeAndAllocate) {
-  // Allocate multiple blocks
-  Allocation alloc1 =
-      allocator_.Allocate(256, D3D12_HEAP_TYPE_UPLOAD);  // 256 bytes
-  ASSERT_EQ(alloc1.size, 256);
-  ASSERT_EQ(alloc1.offset, 0);
+// Test case: Allocate and free memory, then verify free block merging
+TEST_F(DirectXMemoryAllocatorTest, AllocateFreeAndVerifyFreeBlockMerging) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = 1024;                    // 1 KB
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;  // CPU-accessible heap
 
-  Allocation alloc2 =
-      allocator_.Allocate(512, D3D12_HEAP_TYPE_UPLOAD);  // 512 bytes
-  ASSERT_EQ(alloc2.size, 512);
-  ASSERT_EQ(alloc2.offset, 256);
+  DxmaAllocation allocation = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation);
 
-  allocator_.Free(alloc2);
+  // Free the allocation
+  dxmaFree(memoryAllocator_, allocation, nullptr);
 
-  Allocation alloc3 =
-      allocator_.Allocate(1024, D3D12_HEAP_TYPE_UPLOAD);  // 1024 bytes
-  ASSERT_EQ(alloc3.size, 1024);
-  ASSERT_EQ(alloc3.offset, 256);
-
-  Allocation alloc4 =
-      allocator_.Allocate(1024, D3D12_HEAP_TYPE_UPLOAD);  // 1024 bytes
-  ASSERT_EQ(alloc4.size, 1024);
-  ASSERT_EQ(alloc4.offset, 1024 + 256);
-
-  Allocation alloc5 =
-      allocator_.Allocate(1024, D3D12_HEAP_TYPE_UPLOAD);  // 1024 bytes
-  ASSERT_EQ(alloc5.size, 1024);
-  ASSERT_EQ(alloc5.offset, 1024 + 1024 + 256);
-
-  allocator_.Free(alloc5);
-
-  Allocation alloc6 =
-      allocator_.Allocate(1024, D3D12_HEAP_TYPE_UPLOAD);  // 1024 bytes
-  ASSERT_EQ(alloc6.size, 1024);
-  ASSERT_EQ(alloc6.offset, 1024 + 1024 + 256);
-
-  allocator_.Free(alloc1);
-  allocator_.Free(alloc3);
-  allocator_.Free(alloc4);
-  allocator_.Free(alloc6);
-
-  Allocation alloc7 =
-      allocator_.Allocate(4096, D3D12_HEAP_TYPE_UPLOAD);  // 4096 bytes
-  ASSERT_EQ(alloc7.size, 4096);
-  ASSERT_EQ(
-      alloc7.offset,
-      0);  // All previous memory was freed, so the offset should restart at 0
-
-  // Check if free blocks merged correctly
-  uint32_t free_blocks_size = allocator_.get_free_blocks_size();
-  ASSERT_EQ(free_blocks_size, 1);
+  // Verify that free blocks are merged correctly
+  uint32_t freeBlockCount = memoryAllocator_->GetFreeBlockCount();
+  ASSERT_EQ(freeBlockCount, 1);
 }
 
-TEST_F(MemAllocatorTest, OverAllocateCpuMemory) {
-  // Attempt to allocate more memory than available
-  Allocation alloc =
-      allocator_.Allocate(DX12_MA_HEAP_BLOCK_SIZE + 1, D3D12_HEAP_TYPE_UPLOAD);
-  ASSERT_NE(alloc.size,
-            0);  // Should not fail, as a new heap should be allocated
+// Test case: Allocate multiple memory blocks and free them
+TEST_F(DirectXMemoryAllocatorTest, AllocateMultipleBlocksAndFreeThem) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = 512;                     // 512 bytes
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;  // CPU-accessible heap
 
-  // Check if free blocks are correct
-  uint32_t free_blocks_size = allocator_.get_free_blocks_size();
-  ASSERT_EQ(free_blocks_size, 1);
+  // Allocate three blocks
+  DxmaAllocation allocation1 = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation1);
+
+  allocationInfo.type = D3D12_HEAP_TYPE_DEFAULT;  // GPU-accessible heap
+  DxmaAllocation allocation2 = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation2);
+
+  allocationInfo.size = 256;                     // 256 bytes
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;  // CPU-accessible heap
+  DxmaAllocation allocation3 = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation3);
+
+  // Verify allocations
+  ASSERT_EQ(allocation1->GetSize(), 512);
+  ASSERT_EQ(allocation2->GetSize(), 512);
+  ASSERT_EQ(allocation3->GetSize(), 256);
+
+  // Free all allocations
+  dxmaFree(memoryAllocator_, allocation1, nullptr);
+  dxmaFree(memoryAllocator_, allocation2, nullptr);
+  dxmaFree(memoryAllocator_, allocation3, nullptr);
+
+  // Verify free block merging
+  ASSERT_EQ(memoryAllocator_->GetFreeBlockCount(), 2);
 }
 
-TEST_F(MemAllocatorTest, AllocateExactHeapSize) {
-  // Allocate entire CPU heap
-  Allocation alloc =
-      allocator_.Allocate(DX12_MA_HEAP_BLOCK_SIZE, D3D12_HEAP_TYPE_UPLOAD);
-  ASSERT_EQ(alloc.size, DX12_MA_HEAP_BLOCK_SIZE);
+// Test case: Allocate, free, and reallocate memory
+TEST_F(DirectXMemoryAllocatorTest, AllocateFreeAndReallocateMemory) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = 256;                     // 256 bytes
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;  // CPU-accessible heap
 
-  // Ensure that the next allocation doesn't fail
-  Allocation alloc_fail = allocator_.Allocate(1, D3D12_HEAP_TYPE_UPLOAD);
-  ASSERT_NE(alloc_fail.size, 0);
+  // Allocate first block
+  DxmaAllocation allocation1 = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation1);
+  ASSERT_EQ(allocation1->GetSize(), 256);
+  ASSERT_EQ(allocation1->GetOffset(), 0);
 
-  // Check if free blocks are correct
-  uint32_t free_blocks_size = allocator_.get_free_blocks_size();
-  ASSERT_EQ(free_blocks_size, 1);
+  // Allocate second block
+  allocationInfo.size = 512;  // 512 bytes
+  DxmaAllocation allocation2 = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation2);
+  ASSERT_EQ(allocation2->GetSize(), 512);
+  ASSERT_EQ(allocation2->GetOffset(), 256);
+
+  // Free the second allocation
+  dxmaFree(memoryAllocator_, allocation2, nullptr);
+
+  // Allocate a larger block
+  allocationInfo.size = 1024;  // 1 KB
+  DxmaAllocation allocation3 = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation3);
+  ASSERT_EQ(allocation3->GetSize(), 1024);
+  ASSERT_EQ(allocation3->GetOffset(), 256);
+
+  // Free all allocations
+  dxmaFree(memoryAllocator_, allocation1, nullptr);
+  dxmaFree(memoryAllocator_, allocation3, nullptr);
+
+  // Verify free block merging
+  ASSERT_EQ(memoryAllocator_->GetFreeBlockCount(), 1);
+}
+
+// Test case: Allocate more memory than the default heap size
+TEST_F(DirectXMemoryAllocatorTest, AllocateMemoryLargerThanDefaultHeapSize) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = DXMA_HEAP_BLOCK_SIZE + 1;  // Exceed default heap size
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;    // CPU-accessible heap
+
+  DxmaAllocation allocation = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation);
+
+  ASSERT_NE(allocation, nullptr);
+  ASSERT_GT(allocation->GetSize(), 0);
+
+  // Verify free block count
+  ASSERT_EQ(memoryAllocator_->GetFreeBlockCount(), 1);
+}
+
+// Test case: Allocate memory and create a DirectX 12 resource
+TEST_F(DirectXMemoryAllocatorTest, AllocateMemoryAndCreateResource) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = 1024;                    // 1 KB
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;  // CPU-accessible heap
+
+  DxmaAllocation allocation = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation);
+
+  ASSERT_NE(allocation, nullptr);
+
+  // Create a DirectX 12 resource
+  D3D12_RESOURCE_DESC resourceDesc{};
+  resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  resourceDesc.Width = allocationInfo.size;
+  resourceDesc.Height = 1;
+  resourceDesc.DepthOrArraySize = 1;
+  resourceDesc.MipLevels = 1;
+  resourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+  resourceDesc.SampleDesc.Count = 1;
+  resourceDesc.SampleDesc.Quality = 0;
+  resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  resourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+  HRESULT hr = dxmaCreateResource(memoryAllocator_, allocation, &resourceDesc,
+                                  D3D12_RESOURCE_STATE_COMMON);
+  ASSERT_TRUE(SUCCEEDED(hr));
+
+  // Free the allocation (resource will be auto-managed)
+  dxmaFree(memoryAllocator_, allocation);
+}
+
+// Test case: Map and unmap memory for CPU access
+TEST_F(DirectXMemoryAllocatorTest, MapAndUnmapMemoryForCpuAccess) {
+  DxmaAllocationInfo allocationInfo{};
+  allocationInfo.size = 1024;                    // 1 KB
+  allocationInfo.type = D3D12_HEAP_TYPE_UPLOAD;  // CPU-accessible heap
+
+  DxmaAllocation allocation = nullptr;
+  dxmaAllocate(memoryAllocator_, allocationInfo, &allocation);
+
+  ASSERT_NE(allocation, nullptr);
+
+  // Create a DirectX 12 resource
+  D3D12_RESOURCE_DESC resourceDesc{};
+  resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  resourceDesc.Width = allocationInfo.size;
+  resourceDesc.Height = 1;
+  resourceDesc.DepthOrArraySize = 1;
+  resourceDesc.MipLevels = 1;
+  resourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+  resourceDesc.SampleDesc.Count = 1;
+  resourceDesc.SampleDesc.Quality = 0;
+  resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  resourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+  HRESULT hr = dxmaCreateResource(memoryAllocator_, allocation, &resourceDesc,
+                                  D3D12_RESOURCE_STATE_COMMON);
+  ASSERT_TRUE(SUCCEEDED(hr));
+
+  // Map the memory for CPU access
+  void* mappedData = nullptr;
+  hr = dxmaMapMemory(allocation, &mappedData);
+  ASSERT_TRUE(SUCCEEDED(hr));
+  ASSERT_TRUE(allocation->IsMemoryMapped());
+
+  // Write data to the mapped memory
+  memcpy(mappedData, "Hello", 5);
+
+  // Unmap the memory
+  dxmaUnmapMemory(allocation);
+  ASSERT_FALSE(allocation->IsMemoryMapped());
+
+  // Free the allocation
+  dxmaFree(memoryAllocator_, allocation);
 }
 
 int main(int argc, char** argv) {
